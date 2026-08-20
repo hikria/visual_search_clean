@@ -1,0 +1,48 @@
+{
+  "split": "originalQA",
+  "pred_file": "results/originalQA/qwen3vl_direct.pred.jsonl",
+  "per_source": {
+    "mme_realworld_lite": {
+      "n": 328,
+      "accuracy": 0.4939,
+      "correct": 162,
+      "metric": "mcq_letter_exact (MME-RealWorld extract_characters_regex)",
+      "source": "mme_realworld_lite"
+    },
+    "hr_bench_4k": {
+      "n": 122,
+      "accuracy": 0.8279,
+      "correct": 101,
+      "metric": "mcq_letter_exact (MME-RealWorld extract_characters_regex)",
+      "source": "hr_bench_4k"
+    },
+    "treebench": {
+      "n": 80,
+      "accuracy": 0.4125,
+      "correct": 33,
+      "metric": "mcq_letter_exact (MME-RealWorld extract_characters_regex)",
+      "source": "treebench"
+    },
+    "o3_bench": {
+      "n": 64,
+      "accuracy": 0.3125,
+      "correct": 20,
+      "metric": "mcq_letter_exact (MME-RealWorld extract_characters_regex)",
+      "source": "o3_bench"
+    },
+    "vstar_bench": {
+      "n": 38,
+      "accuracy": 0.8158,
+      "correct": 31,
+      "metric": "mcq_letter_exact (MME-RealWorld extract_characters_regex)",
+      "source": "vstar_bench"
+    },
+    "visualprobe_hard": {
+      "n": 20,
+      "accuracy": 0.05,
+      "correct": 1,
+      "source": "visualprobe_hard",
+      "metric": "open-ended, Mini-o3 official: gpt-judge(qwen-max)"
+    }
+  }
+}

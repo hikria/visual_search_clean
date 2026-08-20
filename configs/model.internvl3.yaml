@@ -1,0 +1,28 @@
+# ============================================================
+# Base model: InternVL3-8B (local weights, family=internvl).
+# Second base family for baseline diversity (Qwen vs InternVL).
+# Vision preprocessing: raw PIL image handed to vLLM (no qwen_vl_utils);
+# InternVL applies its own dynamic tiling internally.
+# ============================================================
+
+base_model:
+  model_id: "OpenGVLab/InternVL3-8B"       # resolved from HF_HOME cache
+  family: "internvl"
+  backend: "vllm"
+  dtype: "bfloat16"
+  tensor_parallel_size: 2   # 8B bf16 + HR images -> 2x RTX 3090 (24G)
+  max_model_len: 8192
+  gpu_memory_utilization: 0.90
+  max_num_seqs: 32          # small eval batch; low warmup memory on 24G
+  limit_mm_per_prompt_image: 1
+
+generation:
+  temperature: 0.0          # greedy for reproducible baseline eval
+  top_p: 1.0
+  max_new_tokens: 1024
+  seed: 258
+
+image:
+  # InternVL tiles internally; these are advisory (ignored by PIL loader).
+  min_pixels: 256000
+  max_pixels: 4096000

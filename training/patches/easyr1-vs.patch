@@ -1,0 +1,208 @@
+diff --git a/verl/trainer/main.py b/verl/trainer/main.py
+index 045180e..1719c66 100644
+--- a/verl/trainer/main.py
++++ b/verl/trainer/main.py
+@@ -13,6 +13,7 @@
+ # limitations under the License.
+ 
+ import json
++import os
+ 
+ import ray
+ from omegaconf import OmegaConf
+@@ -32,59 +33,63 @@ class Runner:
+     """A runner for RL training."""
+ 
+     def run(self, config: PPOConfig):
+-        # print config
+-        print(json.dumps(config.to_dict(), indent=2))
+-
+-        # instantiate tokenizer
+-        tokenizer = get_tokenizer(
+-            config.worker.actor.model.model_path,
+-            override_chat_template=config.data.override_chat_template,
+-            trust_remote_code=config.worker.actor.model.trust_remote_code,
+-            use_fast=True,
+-        )
+-        processor = get_processor(
+-            config.worker.actor.model.model_path,
+-            override_chat_template=config.data.override_chat_template,
+-            trust_remote_code=config.worker.actor.model.trust_remote_code,
+-            use_fast=True,
+-        )
+-
+-        # define worker classes
+-        ray_worker_group_cls = RayWorkerGroup
+-        role_worker_mapping = {
+-            Role.ActorRolloutRef: ray.remote(FSDPWorker),
+-            Role.Critic: ray.remote(FSDPWorker),
+-        }
+-        global_pool_id = "global_pool"
+-        resource_pool_spec = {
+-            global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
+-        }
+-        mapping = {
+-            Role.ActorRolloutRef: global_pool_id,
+-            Role.Critic: global_pool_id,
+-        }
+-        resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
+-
+-        RemoteRewardManager = ray.remote(AutoRewardManager).options(num_cpus=config.worker.reward.num_cpus)
+-        reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
+-        val_reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
+-
+-        train_dataloader, val_dataloader = create_dataloader(config.data, tokenizer, processor)
+-
+-        trainer = RayPPOTrainer(
+-            config=config,
+-            tokenizer=tokenizer,
+-            processor=processor,
+-            train_dataloader=train_dataloader,
+-            val_dataloader=val_dataloader,
+-            role_worker_mapping=role_worker_mapping,
+-            resource_pool_manager=resource_pool_manager,
+-            ray_worker_group_cls=ray_worker_group_cls,
+-            reward_fn=reward_fn,
+-            val_reward_fn=val_reward_fn,
+-        )
+-        trainer.init_workers()
+-        trainer.fit()
++        _run_impl(config)
++
++
++def _run_impl(config: PPOConfig):
++    # print config
++    print(json.dumps(config.to_dict(), indent=2))
++
++    # instantiate tokenizer
++    tokenizer = get_tokenizer(
++        config.worker.actor.model.model_path,
++        override_chat_template=config.data.override_chat_template,
++        trust_remote_code=config.worker.actor.model.trust_remote_code,
++        use_fast=True,
++    )
++    processor = get_processor(
++        config.worker.actor.model.model_path,
++        override_chat_template=config.data.override_chat_template,
++        trust_remote_code=config.worker.actor.model.trust_remote_code,
++        use_fast=True,
++    )
++
++    # define worker classes
++    ray_worker_group_cls = RayWorkerGroup
++    role_worker_mapping = {
++        Role.ActorRolloutRef: ray.remote(FSDPWorker),
++        Role.Critic: ray.remote(FSDPWorker),
++    }
++    global_pool_id = "global_pool"
++    resource_pool_spec = {
++        global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
++    }
++    mapping = {
++        Role.ActorRolloutRef: global_pool_id,
++        Role.Critic: global_pool_id,
++    }
++    resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
++
++    RemoteRewardManager = ray.remote(AutoRewardManager).options(num_cpus=config.worker.reward.num_cpus)
++    reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
++    val_reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
++
++    train_dataloader, val_dataloader = create_dataloader(config.data, tokenizer, processor)
++
++    trainer = RayPPOTrainer(
++        config=config,
++        tokenizer=tokenizer,
++        processor=processor,
++        train_dataloader=train_dataloader,
++        val_dataloader=val_dataloader,
++        role_worker_mapping=role_worker_mapping,
++        resource_pool_manager=resource_pool_manager,
++        ray_worker_group_cls=ray_worker_group_cls,
++        reward_fn=reward_fn,
++        val_reward_fn=val_reward_fn,
++    )
++    trainer.init_workers()
++    trainer.fit()
+ 
+ 
+ def main():
+@@ -107,15 +112,39 @@ def main():
+                 "NCCL_DEBUG": "WARN",
+                 "VLLM_LOGGING_LEVEL": "WARN",
+                 "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
++                # vLLM sleep-mode uses a CUDA memory pool (CuMemAllocator) that is
++                # incompatible with expandable_segments -> must stay False here.
+                 "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
+                 "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+                 "VLLM_ALLREDUCE_USE_SYMM_MEM": "0",
++                # RTX 3090 (no NVLink) has no PCIe P2P peer access -> force NCCL
++                # off GPUDirect P2P and its cuMem allocator (Cuda failure 217).
++                "NCCL_P2P_DISABLE": "1",
++                "NCCL_CUMEM_ENABLE": "0",
+             }
+         }
+-        ray.init(runtime_env=runtime_env)
++        # vs_baselines: root fs (/tmp) is ~98% full; Ray's file_system_monitor
++        # trips at 95% and refuses object creation / marks the node unhealthy.
++        # Redirect Ray's session+object-store temp dir to the 9 TB /media/HDD via
++        # env RAY_TEMP (kept short so the AF_UNIX plasma socket path stays <107 chars).
++        _ray_temp = os.environ.get("RAY_TEMP")
++        # Ray sizes its plasma object store at ~30% of RAM (~37 GB here) in
++        # /dev/shm. We pass only tiny control objects through plasma, so cap it
++        # small to leave shared memory for vLLM's rollout weight-gather (the
++        # colocated FSDP->vLLM sync otherwise kernel-OOMs on this 125 GB box).
++        _obj_store = int(os.environ.get("RAY_OBJECT_STORE_BYTES", str(4 * 1024**3)))
++        _ray_kwargs = {"runtime_env": runtime_env, "object_store_memory": _obj_store}
++        if _ray_temp:
++            _ray_kwargs["_temp_dir"] = _ray_temp
++        ray.init(**_ray_kwargs)
+ 
+     runner = Runner.remote()
+-    ray.get(runner.run.remote(ppo_config))
++    if os.environ.get("VS_DEBUG_LOCAL") == "1":
++        # debug: run the training body in the DRIVER process so real tracebacks
++        # (otherwise swallowed when the Runner actor's worker dies) surface.
++        _run_impl(ppo_config)
++    else:
++        ray.get(runner.run.remote(ppo_config))
+ 
+     if ppo_config.trainer.ray_timeline is not None:
+         # use `export RAY_PROFILING=1` to record the ray timeline
+diff --git a/verl/workers/fsdp_workers.py b/verl/workers/fsdp_workers.py
+index 68bd4ef..be66536 100644
+--- a/verl/workers/fsdp_workers.py
++++ b/verl/workers/fsdp_workers.py
+@@ -38,6 +38,14 @@ from transformers import (
+     PreTrainedModel,
+ )
+ from transformers.modeling_utils import no_init_weights
++from transformers.utils import is_flash_attn_2_available
++
++# vs_baselines: this box is Ubuntu 20.04 (glibc 2.31); the prebuilt flash-attn
++# wheels for torch2.8/cp312 need GLIBC_2.32, so flash-attn is unavailable here.
++# Fall back to PyTorch SDPA for the FSDP actor/ref forward. vLLM rollout keeps
++# using its own bundled vllm-flash-attn, unaffected. (When flash-attn IS built
++# from source and importable, this transparently switches back.)
++_ATTN_IMPL = "flash_attention_2" if is_flash_attn_2_available() else "sdpa"
+ 
+ from ..models.monkey_patch import apply_ulysses_patch
+ from ..protocol import DataProto
+@@ -212,7 +220,7 @@ class FSDPWorker(Worker):
+                 model_config.model_path,
+                 config=self.model_config,
+                 torch_dtype=torch_dtype,
+-                attn_implementation="flash_attention_2",
++                attn_implementation=_ATTN_IMPL,
+                 device_map="cpu" if fsdp_config.enable_rank0_init else "cuda",
+                 low_cpu_mem_usage=True,
+                 trust_remote_code=model_config.trust_remote_code,
+@@ -222,7 +230,7 @@ class FSDPWorker(Worker):
+                 model = AutoClass.from_config(
+                     self.model_config,
+                     torch_dtype=torch_dtype,
+-                    attn_implementation="flash_attention_2",
++                    attn_implementation=_ATTN_IMPL,
+                     trust_remote_code=model_config.trust_remote_code,
+                 )
+ 

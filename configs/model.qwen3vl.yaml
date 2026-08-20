@@ -1,0 +1,27 @@
+# ============================================================
+# Base model: Qwen3-VL-8B-Instruct (local weights, family=qwen).
+# Same checkpoint will feed EasyR1 GRPO -> fair baseline vs method.
+# Vision preprocessing via qwen_vl_utils.process_vision_info (official).
+# ============================================================
+
+base_model:
+  model_id: "Qwen/Qwen3-VL-8B-Instruct"   # resolved from HF_HOME cache
+  family: "qwen"
+  backend: "vllm"
+  dtype: "bfloat16"
+  tensor_parallel_size: 2   # 8B bf16 + HR images -> 2x RTX 3090 (24G)
+  max_model_len: 8192
+  gpu_memory_utilization: 0.90
+  max_num_seqs: 32          # small eval batch; low warmup memory on 24G
+  limit_mm_per_prompt_image: 1
+
+generation:
+  temperature: 0.0          # greedy for reproducible baseline eval
+  top_p: 1.0
+  max_new_tokens: 1024
+  seed: 258
+
+image:
+  # Qwen native dynamic resolution; keep HR detail for visual search.
+  min_pixels: 256000
+  max_pixels: 4096000

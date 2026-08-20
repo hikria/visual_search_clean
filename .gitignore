@@ -1,0 +1,40 @@
+# --- data & models never go in git (large, and eval data must stay reproducible via splits) ---
+data/*.jsonl
+data/images/
+# symlink into the local benchmark image store
+data/images
+*.safetensors
+*.bin
+*.pt
+*.pth
+checkpoints/
+outputs/
+results/**/predictions*.jsonl
+# raw prediction dumps & run scratch: keep only *.score.json + RESULTS.md summaries in git
+results/**/*.pred.jsonl
+results/smoke/*.jsonl
+*.nohup
+*.progress
+# training-checkpoint payload (weights + tokenizer copy); keep only the small top-level
+# experiment_*.json / experiment_log.jsonl smoke evidence
+results/**/global_step_*/
+# merged-LoRA model dirs: tokenizer/vocab/merges copies duplicated from the base
+# model (in HF cache); only *.score.json + RESULTS.md summaries belong in git
+results/evals/**/merged_model/
+results/evals/merged/
+wandb/
+*.log
+
+# --- vendored official eval repos: cloned by eval/vendor/fetch_official.sh, not committed ---
+eval/vendor/*/
+!eval/vendor/README.md
+!eval/vendor/fetch_official.sh
+
+# --- EasyR1 training framework: cloned by scripts/setup_training.sh, not committed ---
+training/EasyR1/
+
+# --- python noise ---
+__pycache__/
+*.pyc
+.venv/
+.env

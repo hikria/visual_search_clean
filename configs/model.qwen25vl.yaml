@@ -1,0 +1,30 @@
+# ============================================================
+# Base model: Qwen2.5-VL-7B-Instruct (local weights, family=qwen).
+# RELIABLE Qwen-family baseline: classic Qwen2VL image processor
+# (min_pixels/max_pixels), fully supported by vLLM 0.15.1.
+# Use this as the Qwen baseline while Qwen3-VL is blocked by a
+# vLLM<->transformers image-processor mismatch in the vLLM eval env
+# ('Qwen2VLImageProcessor' object has no attribute 'max_pixels').
+# Same checkpoint feeds EasyR1 GRPO -> fair baseline vs method.
+# ============================================================
+
+base_model:
+  model_id: "Qwen/Qwen2.5-VL-7B-Instruct"
+  family: "qwen"
+  backend: "vllm"
+  dtype: "bfloat16"
+  tensor_parallel_size: 2   # 7B bf16 + HR images -> 2x RTX 3090 (24G)
+  max_model_len: 8192
+  gpu_memory_utilization: 0.85   # HR multimodal (max_pixels 4M) spikes vision-encoder acts; leave headroom on 24G 3090
+  max_num_seqs: 32          # small eval batch; low warmup memory on 24G
+  limit_mm_per_prompt_image: 1
+
+generation:
+  temperature: 0.0          # greedy for reproducible baseline eval
+  top_p: 1.0
+  max_new_tokens: 1024
+  seed: 258
+
+image:
+  min_pixels: 256000
+  max_pixels: 4096000
